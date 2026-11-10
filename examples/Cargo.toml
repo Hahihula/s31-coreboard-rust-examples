@@ -28,3 +28,6 @@ embassy-sync           = { workspace = true }
 embassy-futures        = { workspace = true }
 smart-leds             = { workspace = true }
 libm                   = { workspace = true }
+esp-radio              = { workspace = true }
+embassy-net            = { workspace = true }
+static_cell            = { workspace = true }

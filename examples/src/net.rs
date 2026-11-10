@@ -1,0 +1,217 @@
+//! Wi-Fi station plus embassy-net stack, shared by the network demos.
+//!
+//! Credentials are read at build time from the `WIFI_SSID` and `WIFI_PASSWORD`
+//! environment variables. An empty or missing password selects an open network.
+
+use embassy_executor::Spawner;
+use embassy_net::{
+    Config as NetConfig, Runner, Stack, StackResources,
+    dns::DnsQueryType,
+    udp::{PacketMetadata, UdpSocket},
+};
+use embassy_time::{Duration, Timer, with_timeout};
+use esp_hal::peripherals::WIFI;
+use esp_radio::wifi::{
+    AuthenticationMethodConfig, Config as WifiConfig, ControllerConfig, Interface, WifiController,
+    WifiError,
+    sta::{ScanMethod, StationConfig},
+};
+use log::{info, warn};
+use static_cell::StaticCell;
+
+use crate::sntp;
+
+/// Socket slots: DHCP, DNS, plus a few for the application.
+const SOCKETS: usize = 6;
+const RECONNECT_DELAY: Duration = Duration::from_secs(5);
+/// A connect attempt normally finishes within a few seconds; give up after this.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Build-time Wi-Fi credentials, if `WIFI_SSID` was set.
+pub fn credentials() -> Option<(&'static str, &'static str)> {
+    let ssid = option_env!("WIFI_SSID").filter(|s| !s.is_empty())?;
+    Some((ssid, option_env!("WIFI_PASSWORD").unwrap_or("")))
+}
+
+/// Station configuration for `ssid`; an empty `password` selects an open network.
+pub fn station_config(ssid: &str, password: &str) -> Result<WifiConfig, WifiError> {
+    let auth = if password.is_empty() {
+        AuthenticationMethodConfig::Open
+    } else {
+        AuthenticationMethodConfig::Wpa2Personal(
+            password
+                .try_into()
+                .map_err(|_| WifiError::InvalidArguments)?,
+        )
+    };
+    // Scan all channels before joining, so the strongest access point of
+    // the network is chosen (the default fast scan takes the first one found).
+    let station = StationConfig::default()
+        .with_ssid(ssid.try_into().map_err(|_| WifiError::InvalidArguments)?)
+        .with_authentication(auth)
+        .with_scan_method(ScanMethod::AllChannels);
+    Ok(WifiConfig::Station(station))
+}
+
+/// Creates the station interface and starts the Wi-Fi controller with `config`
+/// (or an unconfigured station when `None`), following the esp-radio examples.
+pub fn init_wifi(
+    wifi: WIFI<'static>,
+    config: Option<WifiConfig>,
+) -> Result<(WifiController<'static>, Interface), WifiError> {
+    let interface = Interface::station();
+    let controller_config = match config {
+        Some(config) => ControllerConfig::default().with_initial_config(config),
+        None => ControllerConfig::default(),
+    };
+    let controller = WifiController::new(wifi, controller_config)?;
+    Ok((controller, interface))
+}
+
+/// Starts the network stack with DHCP and spawns the runner and the
+/// connect/reconnect tasks.
+pub fn start(
+    spawner: &Spawner,
+    controller: WifiController<'static>,
+    interface: Interface,
+    seed: u64,
+) -> Stack<'static> {
+    static RESOURCES: StaticCell<StackResources<SOCKETS>> = StaticCell::new();
+
+    let (stack, runner) = embassy_net::new(
+        interface,
+        NetConfig::dhcpv4(Default::default()),
+        RESOURCES.init(StackResources::new()),
+        seed,
+    );
+
+    spawner.spawn(net_task(runner).expect("spawn net task"));
+    spawner.spawn(connection_task(controller).expect("spawn wifi task"));
+    stack
+}
+
+#[embassy_executor::task]
+async fn net_task(mut runner: Runner<'static, Interface>) -> ! {
+    runner.run().await
+}
+
+#[embassy_executor::task]
+async fn connection_task(mut controller: WifiController<'static>) -> ! {
+    loop {
+        if controller.is_connected() {
+            match controller.wait_for_disconnect_async().await {
+                Ok(info) => warn!("Wi-Fi disconnected: {:?}", info.reason),
+                Err(e) => warn!("Wi-Fi disconnect wait failed: {e:?}"),
+            }
+            Timer::after(RECONNECT_DELAY).await;
+        }
+
+        info!("Wi-Fi connecting...");
+        match with_timeout(CONNECT_TIMEOUT, controller.connect_async()).await {
+            Ok(Ok(ap)) => info!(
+                "Wi-Fi connected to '{}' (channel {}, RSSI {} dBm)",
+                ap.ssid.as_str(),
+                ap.channel,
+                controller.rssi().unwrap_or(0)
+            ),
+            Ok(Err(e)) => {
+                warn!("Wi-Fi connect failed: {e:?}, retrying in 5 s");
+                Timer::after(RECONNECT_DELAY).await;
+            }
+            Err(_) => {
+                warn!(
+                    "Wi-Fi connect got no answer within {} s, aborting and retrying",
+                    CONNECT_TIMEOUT.as_secs()
+                );
+                // Abort the pending attempt so the next one starts cleanly.
+                if let Ok(Err(e)) =
+                    with_timeout(RECONNECT_DELAY, controller.disconnect_async()).await
+                {
+                    warn!("Wi-Fi abort failed: {e:?}");
+                }
+                Timer::after(RECONNECT_DELAY).await;
+            }
+        }
+    }
+}
+
+/// Why [`ntp_time`] failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NtpError {
+    /// The server name didn't resolve.
+    Dns,
+    /// The UDP socket couldn't be bound or used.
+    Socket,
+    /// No valid reply within 5 s.
+    Timeout,
+    /// The last reply from the server was rejected.
+    BadReply(sntp::ReplyError),
+}
+
+impl core::fmt::Display for NtpError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            NtpError::Dns => f.write_str("DNS lookup failed"),
+            NtpError::Socket => f.write_str("UDP socket error"),
+            NtpError::Timeout => f.write_str("no reply"),
+            NtpError::BadReply(e) => write!(f, "bad reply: {e}"),
+        }
+    }
+}
+
+impl core::error::Error for NtpError {}
+
+/// Asks `server` for the time (SNTP v4) and returns Unix seconds.
+pub async fn ntp_time(stack: Stack<'_>, server: &str) -> Result<u64, NtpError> {
+    let addrs = stack
+        .dns_query(server, DnsQueryType::A)
+        .await
+        .map_err(|_| NtpError::Dns)?;
+    let addr = *addrs.first().ok_or(NtpError::Dns)?;
+
+    let mut rx_meta = [PacketMetadata::EMPTY; 2];
+    let mut rx_buf = [0u8; 128];
+    let mut tx_meta = [PacketMetadata::EMPTY; 2];
+    let mut tx_buf = [0u8; 128];
+    let mut socket = UdpSocket::new(stack, &mut rx_meta, &mut rx_buf, &mut tx_meta, &mut tx_buf);
+    socket.bind(0).map_err(|_| NtpError::Socket)?;
+
+    // A random transmit timestamp, which the server echoes back: replies
+    // that don't carry it (stray or forged packets) are ignored.
+    let rng = esp_hal::rng::Rng::new();
+    let mut nonce = [0u8; 8];
+    nonce[..4].copy_from_slice(&rng.random().to_be_bytes());
+    nonce[4..].copy_from_slice(&rng.random().to_be_bytes());
+    socket
+        .send_to(&sntp::request(nonce), (addr, 123))
+        .await
+        .map_err(|_| NtpError::Socket)?;
+
+    // Only packets from the server's address and port count; keep listening
+    // past others until the timeout.
+    let mut last = NtpError::Timeout;
+    let receive = async {
+        let mut reply = [0u8; 64];
+        loop {
+            let Ok((len, meta)) = socket.recv_from(&mut reply).await else {
+                return Err(NtpError::Socket);
+            };
+            if meta.endpoint.addr != addr || meta.endpoint.port != 123 {
+                continue;
+            }
+            match sntp::parse_reply(&reply[..len], nonce) {
+                Ok(unix) => return Ok(unix),
+                Err(e) => last = NtpError::BadReply(e),
+            }
+        }
+    };
+    // Bound first, so the future (which borrows `last`) is gone before the match.
+    let result = with_timeout(Duration::from_secs(5), receive).await;
+    match result {
+        Ok(result) => result,
+        Err(_) => Err(last),
+    }
+}
+
+pub use crate::time::DateTime;

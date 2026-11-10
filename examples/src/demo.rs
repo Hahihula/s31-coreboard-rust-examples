@@ -6,7 +6,7 @@
 ///
 /// ```ignore
 /// esp32_s31_coreboard_examples::start!(p, "Demo 01: RGB LED");
-/// esp32_s31_coreboard_examples::start!(p, "Demo 04: Wi-Fi", heap = 96 * 1024);
+/// esp32_s31_coreboard_examples::start!(p, "Demo 03: Wi-Fi", heap = 96 * 1024);
 /// ```
 #[macro_export]
 macro_rules! start {

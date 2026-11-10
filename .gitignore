@@ -25,5 +25,3 @@ target/
 # Ignore .DS_Store file in mac
 **/.DS_Store
 
-# Local Wi-Fi credentials
-.cargo/wifi.toml

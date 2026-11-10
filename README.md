@@ -15,9 +15,9 @@ Sister repositories:
 - [`espflash`](https://github.com/esp-rs/espflash) 4.x.
 - A USB-C cable into the **USB-to-UART** port of the board.
 
-The ESP32-S31 support in the released esp-rs crates is incomplete, so the root
-`Cargo.toml` pins esp-hal, esp-rtos, esp-alloc, esp-println, esp-backtrace and
-esp-bootloader-esp-idf to a single esp-hal `main` commit with `[patch.crates-io]`. The
+The ESP32-S31 support in the released esp-rs crates is incomplete (for example, the Wi-Fi
+connect hangs in esp-radio 1.0.0-beta.1), so the root `Cargo.toml` pins esp-hal, esp-rtos,
+esp-radio, esp-alloc, esp-println, esp-backtrace and esp-bootloader-esp-idf to a single esp-hal `main` commit with `[patch.crates-io]`. The
 first build downloads that commit from GitHub.
 
 ## Running a demo
@@ -43,7 +43,8 @@ The repository is a Cargo workspace with two crates:
 - **`esp32-s31-coreboard`**: the board library. Pin map, start-up, PSRAM, the codec I2C
   bus, the ES8311 codec and microphone input, the RGB LED and the BOOT button. Use it in your own firmware (see below).
 - **`esp32-s31-coreboard-examples`** (`examples/`): the demos, plus the app-level helpers
-  that only the demos need.
+  (start-up, Wi-Fi, SNTP) that only the demos need, so a firmware using the board doesn't
+  pull in the network stack.
 
 | Path | Contents |
 |------|----------|
@@ -53,6 +54,8 @@ The repository is a Cargo workspace with two crates:
 | `esp32-s31-coreboard/src/es8311.rs` | ES8311 codec driver over any `embedded-hal-async` I2C bus, ported from Espressif's `esp_codec_dev` (clock table and gain steps host-tested) |
 | `esp32-s31-coreboard/src/audio.rs` | I2S input stream from the ES8311 (MCLK = 256 x fs, 16-bit stereo Philips, DMA ring buffer, restarts after an overflow) |
 | `examples/src/lib.rs`, `demo.rs` | Helper crate root; the `start!` macro the demos begin with |
+| `examples/src/net.rs` | Wi-Fi station setup, embassy-net stack with DHCP, reconnect task, SNTP client |
+| `examples/src/sntp.rs`, `time.rs` | SNTP request and reply checks; UTC dates from Unix time (host-tested) |
 | `examples/build.rs` | Linker script (`linkall.x`) and hints for common link errors |
 | `examples/src/bin/NN_*.rs` | The demos |
 
@@ -103,8 +106,8 @@ What the firmware has to bring itself:
 
 ## Tests and CI
 
-The hardware-independent modules (the ES8311 driver's clock table and gain steps) have
-unit tests that run on a PC. The workspace builds for
+The hardware-independent modules (the ES8311 driver's clock table and gain steps, SNTP
+packets, dates) have unit tests that run on a PC. The workspace builds for
 the ESP32-S31 by default, so give the host target:
 
 ```bash
@@ -239,6 +242,72 @@ The first report includes the codec powering up and reads louder.
 There is an `es8311` crate on crates.io, but these demos don't use it: it is blocking
 only, and its mic gain writes values outside the gain bits of register 0x16, so the gain
 doesn't change. `es8311.rs` here follows Espressif's driver register for register.
+
+### 03 – Wi-Fi, DHCP, DNS and NTP
+
+```bash
+cargo run --release --bin 03_wifi
+```
+
+The Wi-Fi credentials are compiled into the firmware from the `WIFI_SSID` and
+`WIFI_PASSWORD` environment variables at build time:
+
+```bash
+WIFI_SSID='my network' WIFI_PASSWORD='secret' cargo run --release --bin 03_wifi
+```
+
+Or export them once in your shell session. Cargo rebuilds automatically when they
+change. Leave out `WIFI_PASSWORD`, or
+set it to an empty string, for an open network. Only WPA2-Personal and open networks are
+supported; WPA3-only networks will not connect. The ESP32-S31 supports 2.4 GHz only.
+
+What the demo does:
+
+1. Starts the Wi-Fi radio (esp-radio) and scans for networks, listing up to 15 with
+   signal strength, channel and security type.
+2. Connects to `WIFI_SSID`, warning first if the scan did not see that network. The
+   station scans all channels before joining, so with several access points of the same
+   network it picks the strongest (esp-radio's default fast scan takes the first one
+   found). A background task reconnects every 5 s if the connection fails or drops. An attempt that
+   gets no answer from the driver within 30 s is cancelled and retried.
+3. Gets an IP address, gateway and DNS server over DHCP (embassy-net).
+4. Looks up `docs.espressif.com` in DNS.
+5. Fetches the time from `pool.ntp.org` with a minimal SNTP request over UDP. Only a reply
+   from the server's address that echoes the request's random timestamp and comes from a
+   synchronised server (stratum 1-15) is accepted.
+6. Every 10 seconds prints the current UTC time (NTP time plus the time elapsed since)
+   and the IP address. If NTP failed, it is retried each round instead.
+
+Without `WIFI_SSID` the demo only runs the scan and then prints how to rebuild with
+credentials. That is a quick way to check the radio without a network.
+
+To see the Wi-Fi driver's own log while debugging a connection, add
+`ESP_LOG=info,esp_radio=debug` in front of the `cargo run` command.
+
+The Wi-Fi driver needs about 60 KiB of internal RAM, so this demo adds a 96 KiB internal
+heap on top of the small default one.
+
+Expected output (verified on a board; names and addresses are examples). The
+`link_up` and `IPv4` lines come from embassy-net:
+
+```
+INFO - === Demo 03: Wi-Fi, DHCP, DNS, NTP ===
+INFO - Station configured for 'my network' (WPA2-Personal)
+INFO - Scanning...
+INFO - Found 14 access point(s):
+INFO -    -70 dBm  ch  6  my network                       Some(Wpa2Personal)
+INFO -    -60 dBm  ch 11  neighbour                        Some(Wpa2Personal)
+INFO -    -38 dBm  ch 11  my network                       Some(Wpa2Personal)
+...
+INFO - Waiting for DHCP...
+INFO - Wi-Fi connecting...
+INFO - link_up = true
+INFO - Wi-Fi connected to 'my network' (channel 11, RSSI -40 dBm)
+INFO - DHCP: address 192.168.1.68/24, gateway Some(192.168.1.1), DNS [192.168.1.1]
+INFO - DNS: docs.espressif.com -> [Ipv4(18.166.108.18)]
+INFO - NTP: 2026-11-10 13:12:46 UTC (1794316366)
+INFO - 2026-11-10 13:12:56 UTC | IP 192.168.1.68/24
+```
 
 ## License
 

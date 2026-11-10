@@ -20,7 +20,7 @@ rust_2018_idioms       = { level = "warn", priority = -1 }
 esp32-s31-coreboard = { path = "esp32-s31-coreboard" }
 
 esp-hal                = { version = "1.2", features = ["esp32s31", "log-04", "unstable"] }
-esp-rtos               = { version = "0.4.0", features = ["embassy", "esp-alloc", "esp32s31", "log-04"] }
+esp-rtos               = { version = "0.4.0", features = ["embassy", "esp-alloc", "esp-radio", "esp32s31", "log-04"] }
 esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s31", "log-04"] }
 esp-alloc              = { version = "0.11.0", features = ["esp32s31"] }
 esp-backtrace          = { version = "0.20.0", features = ["esp32s31", "panic-handler", "println"] }
@@ -34,6 +34,9 @@ esp-hal-smartled       = { version = "0.18", features = ["esp32s31"] }
 smart-leds             = "0.4"
 embedded-hal-async     = "1.0"
 libm                   = "0.2"
+esp-radio              = { version = "1.0.0-beta.2", features = ["esp-alloc", "esp32s31", "log-04", "unstable", "wifi"] }
+embassy-net            = { version = "0.9.1", features = ["dhcpv4", "dns", "log", "medium-ethernet", "tcp", "udp"] }
+static_cell            = "2.1.1"
 
 # The ESP32-S31 support in the released crates is incomplete, so the whole
 # esp-rs stack is pinned to one esp-hal `main` commit (the same one the
@@ -42,6 +45,7 @@ libm                   = "0.2"
 [patch.crates-io]
 esp-hal                = { git = "https://github.com/esp-rs/esp-hal", rev = "33f9b0f7c36ac47edbd015808b5399090fc1f9b6" }
 esp-rtos               = { git = "https://github.com/esp-rs/esp-hal", rev = "33f9b0f7c36ac47edbd015808b5399090fc1f9b6" }
+esp-radio              = { git = "https://github.com/esp-rs/esp-hal", rev = "33f9b0f7c36ac47edbd015808b5399090fc1f9b6" }
 esp-alloc              = { git = "https://github.com/esp-rs/esp-hal", rev = "33f9b0f7c36ac47edbd015808b5399090fc1f9b6" }
 esp-println            = { git = "https://github.com/esp-rs/esp-hal", rev = "33f9b0f7c36ac47edbd015808b5399090fc1f9b6" }
 esp-backtrace          = { git = "https://github.com/esp-rs/esp-hal", rev = "33f9b0f7c36ac47edbd015808b5399090fc1f9b6" }
