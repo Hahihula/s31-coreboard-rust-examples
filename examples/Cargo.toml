@@ -31,3 +31,4 @@ libm                   = { workspace = true }
 esp-radio              = { workspace = true }
 embassy-net            = { workspace = true }
 static_cell            = { workspace = true }
+embedded-io-async      = { workspace = true }

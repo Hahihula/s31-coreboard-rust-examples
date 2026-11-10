@@ -37,6 +37,7 @@ libm                   = "0.2"
 esp-radio              = { version = "1.0.0-beta.2", features = ["esp-alloc", "esp32s31", "log-04", "unstable", "wifi"] }
 embassy-net            = { version = "0.9.1", features = ["dhcpv4", "dns", "log", "medium-ethernet", "tcp", "udp"] }
 static_cell            = "2.1.1"
+embedded-io-async      = "0.7.0"
 
 # The ESP32-S31 support in the released crates is incomplete, so the whole
 # esp-rs stack is pinned to one esp-hal `main` commit (the same one the

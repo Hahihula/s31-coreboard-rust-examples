@@ -98,6 +98,24 @@ pub fn start_wifi(
     stack
 }
 
+/// Connects to the network from `WIFI_SSID` / `WIFI_PASSWORD` and starts
+/// its stack (see [`start_wifi`]). `None`, with a log line, if no SSID was
+/// set at build time or the radio fails to start.
+pub fn start_wifi_from_env(spawner: &Spawner, wifi: WIFI<'static>) -> Option<Stack<'static>> {
+    let Some((ssid, password)) = credentials() else {
+        info!("WIFI_SSID not set at build time, Wi-Fi stays off");
+        return None;
+    };
+    let started = station_config(ssid, password).and_then(|config| init_wifi(wifi, Some(config)));
+    match started {
+        Ok((controller, interface)) => Some(start_wifi(spawner, controller, interface)),
+        Err(e) => {
+            warn!("Wi-Fi start failed: {e:?}");
+            None
+        }
+    }
+}
+
 /// Starts a network stack with DHCP on the Ethernet port and spawns its
 /// runner. The link comes up by itself when a cable is plugged in.
 pub fn start_ethernet(spawner: &Spawner, eth: Eth<'static>) -> Stack<'static> {

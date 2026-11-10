@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32-S31 LED</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #111; color: #eee;
+         display: flex; flex-direction: column; align-items: center; margin: 2rem; }
+  h1 { font-weight: 500; font-size: 1.4rem; }
+  #led { width: 8rem; height: 8rem; border-radius: 50%; margin: 1.5rem;
+         border: 3px solid #333; transition: background .15s, box-shadow .15s; }
+  input[type=color] { width: 6rem; height: 3rem; border: none; background: none; cursor: pointer; }
+  .presets { display: flex; gap: .6rem; margin: 1.2rem; flex-wrap: wrap; justify-content: center; }
+  .presets button { width: 2.6rem; height: 2.6rem; border-radius: 50%; border: 2px solid #444; cursor: pointer; }
+  #off { padding: .6rem 1.6rem; border-radius: 1.5rem; border: 1px solid #555;
+         background: #222; color: #eee; font-size: 1rem; cursor: pointer; }
+  #status { color: #888; font-size: .9rem; margin-top: 1rem; }
+</style>
+</head>
+<body>
+<h1>ESP32-S31-Function-CoreBoard-1 RGB LED</h1>
+<div id="led"></div>
+<input type="color" id="picker" value="#000000">
+<div class="presets"></div>
+<button id="off">Off</button>
+<div id="status">connecting...</div>
+<script>
+const picker = document.getElementById('picker');
+const led = document.getElementById('led');
+const status = document.getElementById('status');
+const presets = ['#ff0000', '#ff8000', '#ffff00', '#00ff00', '#00ffff', '#0000ff', '#ff00ff', '#ffffff'];
+
+function show(color) {
+  picker.value = color;
+  led.style.background = color;
+  led.style.boxShadow = color === '#000000' ? 'none' : `0 0 3rem ${color}`;
+}
+
+// Only one request in flight; the newest color wins while dragging.
+let busy = false, pending = null;
+async function send(color) {
+  if (busy) { pending = color; return; }
+  busy = true;
+  try {
+    const r = await fetch('/api/led?color=' + color.slice(1));
+    const state = await r.json();
+    show(state.color);
+    status.textContent = 'LED set to ' + state.color;
+  } catch (e) {
+    status.textContent = 'board not reachable';
+  }
+  busy = false;
+  if (pending) { const c = pending; pending = null; send(c); }
+}
+
+for (const color of presets) {
+  const b = document.createElement('button');
+  b.style.background = color;
+  b.title = color;
+  b.onclick = () => { show(color); send(color); };
+  document.querySelector('.presets').appendChild(b);
+}
+picker.oninput = () => { show(picker.value); send(picker.value); };
+document.getElementById('off').onclick = () => { show('#000000'); send('#000000'); };
+
+// Start from the board's current color (another browser may have set it).
+fetch('/api/led').then(r => r.json()).then(s => {
+  show(s.color);
+  status.textContent = 'connected';
+}).catch(() => status.textContent = 'board not reachable');
+</script>
+</body>
+</html>

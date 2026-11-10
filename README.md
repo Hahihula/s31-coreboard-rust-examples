@@ -44,7 +44,7 @@ The repository is a Cargo workspace with two crates:
   bus, the ES8311 codec and microphone input, Gigabit Ethernet, the RGB LED and the BOOT
   button. Use it in your own firmware (see below).
 - **`esp32-s31-coreboard-examples`** (`examples/`): the demos, plus the app-level helpers
-  (start-up, Wi-Fi, SNTP) that only the demos need, so a firmware using the board doesn't
+  (start-up, Wi-Fi, SNTP, HTTP) that only the demos need, so a firmware using the board doesn't
   pull in the network stack.
 
 | Path | Contents |
@@ -57,6 +57,8 @@ The repository is a Cargo workspace with two crates:
 | `esp32-s31-coreboard/src/audio.rs` | I2S input stream from the ES8311 (MCLK = 256 x fs, 16-bit stereo Philips, DMA ring buffer, restarts after an overflow) |
 | `examples/src/lib.rs`, `demo.rs` | Helper crate root; the `start!` macro the demos begin with |
 | `examples/src/net.rs` | Wi-Fi station setup and reconnect task, embassy-net stacks with DHCP for Wi-Fi and Ethernet, SNTP client, clock and DNS helpers |
+| `examples/src/http.rs` | Minimal HTTP/1.1: request line, query parameters, `rrggbb` colors, response headers (host-tested) |
+| `examples/assets/web_led.html` | The page of demo 05 (HTML + JavaScript, embedded with `include_str!`) |
 | `examples/src/sntp.rs`, `time.rs` | SNTP request and reply checks; UTC dates from Unix time (host-tested) |
 | `examples/build.rs` | Linker script (`linkall.x`) and hints for common link errors |
 | `examples/src/bin/NN_*.rs` | The demos |
@@ -108,8 +110,8 @@ What the firmware has to bring itself:
 
 ## Tests and CI
 
-The hardware-independent modules (the ES8311 driver's clock table and gain steps, SNTP
-packets, dates) have unit tests that run on a PC. The workspace builds for
+The hardware-independent modules (the ES8311 driver's clock table and gain steps, HTTP
+parsing, SNTP packets, dates) have unit tests that run on a PC. The workspace builds for
 the ESP32-S31 by default, so give the host target:
 
 ```bash
@@ -363,6 +365,39 @@ INFO - 2026-11-10 13:29:29 UTC | IP 192.168.1.70/24
 With `board::init()` instead (MPLL at 400 MHz) the same board logs
 `MPLL at 400 MHz cannot make the 125 MHz RGMII clock, limiting Ethernet to 100 Mbps` and
 links at `_100M`.
+
+### 05 – Web-controlled RGB LED
+
+```bash
+cargo run --release --bin 05_web_led
+```
+
+A web page with a color picker, preset colors and an Off button that sets the onboard
+RGB LED. It is served on **Ethernet and Wi-Fi at the same time**: Ethernet always, Wi-Fi
+when `WIFI_SSID` (and `WIFI_PASSWORD`) were set at build time, as in demo 03:
+
+```bash
+WIFI_SSID='my network' WIFI_PASSWORD='secret' cargo run --release --bin 05_web_led
+```
+
+Open the address from the log (`Ethernet: open http://.../`) in a browser on the same
+network. The LED and the circle on the page follow the picker while you drag it. A page
+opened in another browser picks up the current color when it loads.
+
+How it works:
+
+- Each network has its own embassy-net stack (from `net.rs`) and two server tasks
+  accepting on port 80, so a browser's second connection doesn't wait. A connection
+  carries one request and is closed after the response.
+- `http.rs` parses just the request line and query string; there is no web framework.
+  The page comes from `examples/assets/web_led.html`, embedded with `include_str!`.
+- The API is `GET /api/led`, which returns `{"color":"#rrggbb"}`, and
+  `GET /api/led?color=rrggbb`, which sets the color first. You can call it with
+  `curl`, too: `curl 'http://<address>/api/led?color=ff8000'`.
+- A LED task owns the RGB LED and writes each new color, gamma-corrected so it looks
+  like the color picked in the browser.
+- Like demo 04 it uses `board::init_gigabit()` for 1000 Mbps Ethernet, and a 96 KiB heap
+  for the Wi-Fi driver.
 
 ## License
 
