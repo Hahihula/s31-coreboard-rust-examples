@@ -26,10 +26,13 @@ use esp_hal::{
     Async,
     clock::CpuClock,
     i2c::master::{Config as I2cConfig, ConfigError, I2c, Instance as I2cInstance},
-    peripherals::{GPIO50, GPIO51, PSRAM, Peripherals},
+    peripherals::{GPIO50, GPIO51, GPIO60, PSRAM, Peripherals, RMT},
     psram::Psram,
+    rmt::Rmt,
     time::Rate,
 };
+use esp_hal_smartled::{RmtSmartLeds, WS2812B_TIMING, buffer_size, color_order};
+use smart_leds::RGB8;
 
 /// 7-bit addresses of the devices on the I2C bus.
 pub mod i2c_addr {
@@ -83,6 +86,26 @@ pub fn i2c<'d>(
         .with_sda(sda)
         .with_scl(scl)
         .into_async())
+}
+
+/// RMT source clock used for the WS2812 timing.
+const RMT_FREQ: Rate = Rate::from_mhz(80);
+
+/// The single WS2812 RGB LED on GPIO60, driven by RMT channel 0.
+pub type RgbLed<'d> = RmtSmartLeds<'d, { buffer_size::<RGB8>(1) }, Async, RGB8, color_order::Grb>;
+
+/// Creates the async driver for the onboard RGB LED.
+///
+/// GPIO60 reaches the LED through a BSS138 MOSFET that shifts the signal
+/// from 3.3 V to 5 V without inverting it (verified on a board, although
+/// Espressif's board definition claims otherwise in a comment).
+///
+/// # Errors
+///
+/// If the RMT can't be configured.
+pub fn rgb_led<'d>(rmt: RMT<'d>, pin: GPIO60<'d>) -> Result<RgbLed<'d>, esp_hal_smartled::Error> {
+    let rmt = Rmt::new(rmt, RMT_FREQ)?.into_async();
+    RmtSmartLeds::new(WS2812B_TIMING, rmt.channel0, pin, RMT_FREQ)
 }
 
 /// Maps the 16 MB PSRAM and hands the first `reserve` bytes (rounded up to a

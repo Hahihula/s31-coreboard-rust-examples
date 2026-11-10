@@ -24,3 +24,6 @@ esp-backtrace          = { workspace = true }
 embassy-executor       = { workspace = true }
 embassy-time           = { workspace = true }
 log                    = { workspace = true }
+embassy-sync           = { workspace = true }
+embassy-futures        = { workspace = true }
+smart-leds             = { workspace = true }

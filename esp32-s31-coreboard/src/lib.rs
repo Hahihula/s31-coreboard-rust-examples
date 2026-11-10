@@ -30,3 +30,5 @@
 
 #[cfg(target_arch = "riscv32")]
 pub mod board;
+#[cfg(target_arch = "riscv32")]
+pub mod button;

@@ -28,6 +28,10 @@ esp-println            = { version = "0.18.0", features = ["esp32s31", "log-04"]
 embassy-executor       = { version = "0.10.0", features = ["log"] }
 embassy-time           = { version = "0.5.0", features = ["log"] }
 log                    = "0.4.27"
+embassy-sync           = "0.8"
+embassy-futures        = "0.1"
+esp-hal-smartled       = { version = "0.18", features = ["esp32s31"] }
+smart-leds             = "0.4"
 
 # The ESP32-S31 support in the released crates is incomplete, so the whole
 # esp-rs stack is pinned to one esp-hal `main` commit (the same one the
