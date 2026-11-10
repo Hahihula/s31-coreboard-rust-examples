@@ -41,7 +41,7 @@ Log verbosity follows `ESP_LOG` (default `info`), for example
 The repository is a Cargo workspace with two crates:
 
 - **`esp32-s31-coreboard`**: the board library. Pin map, start-up, PSRAM, the codec I2C
-  bus, the RGB LED and the BOOT button. Use it in your own firmware (see below).
+  bus, the ES8311 codec and microphone input, the RGB LED and the BOOT button. Use it in your own firmware (see below).
 - **`esp32-s31-coreboard-examples`** (`examples/`): the demos, plus the app-level helpers
   that only the demos need.
 
@@ -50,6 +50,8 @@ The repository is a Cargo workspace with two crates:
 | `esp32-s31-coreboard/src/lib.rs` | Crate docs: what a firmware using the library needs |
 | `esp32-s31-coreboard/src/board.rs` | Board pin map, I2C device addresses, `init()`, logger, codec I2C bus, RGB LED setup, PSRAM mapping (`psram_reserve`, `psram_split`) |
 | `esp32-s31-coreboard/src/button.rs` | The BOOT button (GPIO61): debounced presses with hold time |
+| `esp32-s31-coreboard/src/es8311.rs` | ES8311 codec driver over any `embedded-hal-async` I2C bus, ported from Espressif's `esp_codec_dev` (clock table and gain steps host-tested) |
+| `esp32-s31-coreboard/src/audio.rs` | I2S input stream from the ES8311 (MCLK = 256 x fs, 16-bit stereo Philips, DMA ring buffer, restarts after an overflow) |
 | `examples/src/lib.rs`, `demo.rs` | Helper crate root; the `start!` macro the demos begin with |
 | `examples/build.rs` | Linker script (`linkall.x`) and hints for common link errors |
 | `examples/src/bin/NN_*.rs` | The demos |
@@ -101,7 +103,8 @@ What the firmware has to bring itself:
 
 ## Tests and CI
 
-Hardware-independent modules get unit tests that run on a PC. The workspace builds for
+The hardware-independent modules (the ES8311 driver's clock table and gain steps) have
+unit tests that run on a PC. The workspace builds for
 the ESP32-S31 by default, so give the host target:
 
 ```bash
@@ -192,6 +195,50 @@ INFO - auto-advance off
 INFO - effect: rainbow
 INFO - brightness 96
 ```
+
+### 02 – Microphone
+
+```bash
+cargo run --release --bin 02_microphone
+```
+
+Records from the onboard microphone through the ES8311 codec and shows the level:
+
+1. Starts I2S as master at 16 kHz, 16-bit stereo Philips, with MCLK (GPIO52) at
+   256 × fs = 4.096 MHz, which the codec runs from.
+2. Reads the ES8311 chip ID (`83 11`) and sets up its ADC path the way Espressif's
+   `esp_codec_dev` driver does: analog microphone, +30 dB PGA, then a digital gain of
+   0-42 dB in 6 dB steps (12 dB at start).
+3. Prints the RMS and peak level twice a second, in dBFS. The ES8311 is mono and sends
+   the same sample in both I2S slots; the demo uses the left one.
+4. Uses the RGB LED as a level meter, updated every 50 ms: dark below -60 dBFS, then
+   brighter and from green through yellow to red at -10 dBFS.
+
+A **BOOT** press steps the gain up by 6 dB, wrapping from 42 dB back to 0 dB.
+
+On a board at 24 dB, a quiet room read about -61 dBFS and speech close to the board
+-15 to -33 dBFS with peaks clipping at full scale, so the demo starts at 12 dB: a quiet
+room then reads about -70 dBFS and speech about -36 dBFS with peaks near -17 dBFS.
+Expected output (verified on a board):
+
+```
+INFO - === Demo 02: microphone (ES8311, 16 kHz) ===
+INFO - ES8311 chip ID [83, 11]
+INFO - ES8311 running, mic gain 12 dB
+INFO - BOOT = next mic gain step (0-42 dB, wraps around)
+INFO - mic  -13.4 dBFS (peak    0.0)
+INFO - mic  -73.7 dBFS (peak  -59.9)
+INFO - mic  -52.3 dBFS (peak  -33.9)
+INFO - mic  -36.1 dBFS (peak  -16.8)
+INFO - mic  -36.5 dBFS (peak  -20.6)
+INFO - mic  -67.2 dBFS (peak  -56.7)
+```
+
+The first report includes the codec powering up and reads louder.
+
+There is an `es8311` crate on crates.io, but these demos don't use it: it is blocking
+only, and its mic gain writes values outside the gain bits of register 0x16, so the gain
+doesn't change. `es8311.rs` here follows Espressif's driver register for register.
 
 ## License
 

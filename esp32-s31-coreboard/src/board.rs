@@ -37,7 +37,7 @@ use smart_leds::RGB8;
 /// 7-bit addresses of the devices on the I2C bus.
 pub mod i2c_addr {
     /// ES8311 audio codec (CE pin low; the schematic lists 8-bit 0x30).
-    pub const ES8311: u8 = 0x18;
+    pub const ES8311: u8 = crate::es8311::ADDRESS;
 }
 
 /// Initialises the HAL with the maximum CPU clock (320 MHz).

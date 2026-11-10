@@ -25,16 +25,13 @@ use esp_hal::{
     i2c::master::{AcknowledgeCheckFailedReason, Error as I2cError, I2c},
     psram::Psram,
 };
-use esp32_s31_coreboard::board::{self, i2c_addr};
+use esp32_s31_coreboard::{
+    board::{self, i2c_addr},
+    es8311::{self, Es8311},
+};
 use log::{info, warn};
 
 esp_bootloader_esp_idf::esp_app_desc!();
-
-/// ES8311 chip ID registers and the values they hold.
-const ES8311_ID_REGS: [u8; 2] = [0xFD, 0xFE];
-const ES8311_ID: [u8; 2] = [0x83, 0x11];
-/// ES8311 chip version register.
-const ES8311_VERSION_REG: u8 = 0xFF;
 
 /// Upper bound for one I2C transfer, so a stuck bus can't hang the demo.
 const I2C_TIMEOUT: Duration = Duration::from_millis(50);
@@ -71,45 +68,24 @@ async fn main(_spawner: Spawner) -> ! {
     halt().await
 }
 
-/// Reads one ES8311 register, `None` on any error or timeout.
-async fn read_reg(i2c: &mut I2c<'_, Async>, reg: u8) -> Option<u8> {
-    let mut value = [0u8];
-    with_timeout(
-        I2C_TIMEOUT,
-        i2c.write_read_async(i2c_addr::ES8311, &[reg], &mut value),
-    )
-    .await
-    .ok()?
-    .ok()?;
-    Some(value[0])
-}
-
 /// Checks the ES8311 chip ID and logs it with the chip version.
-#[allow(
-    clippy::large_stack_frames,
-    reason = "the async I2C transfer future is ~1 KiB; awaited once from main"
-)]
-async fn check_codec(i2c: &mut I2c<'_, Async>) -> bool {
-    let mut id = [0u8; 2];
-    for (byte, reg) in id.iter_mut().zip(ES8311_ID_REGS) {
-        match read_reg(i2c, reg).await {
-            Some(v) => *byte = v,
-            None => {
-                warn!("ES8311 did not answer at 0x{:02X}", i2c_addr::ES8311);
-                return false;
-            }
+async fn check_codec(i2c: &mut I2c<'_, Async>) {
+    let mut codec = Es8311::new(i2c);
+    match codec.chip_id().await {
+        Ok(es8311::CHIP_ID) => {
+            let version = codec.chip_version().await.ok();
+            info!(
+                "ES8311 chip ID {:02X?}, version {version:02X?}",
+                es8311::CHIP_ID
+            );
         }
+        Ok(id) => warn!(
+            "Device at 0x{:02X} has chip ID {id:02X?}, expected {:02X?}",
+            es8311::ADDRESS,
+            es8311::CHIP_ID
+        ),
+        Err(e) => warn!("ES8311 did not answer at 0x{:02X}: {e:?}", es8311::ADDRESS),
     }
-    if id != ES8311_ID {
-        warn!(
-            "Device at 0x{:02X} has chip ID {id:02X?}, expected {ES8311_ID:02X?}",
-            i2c_addr::ES8311
-        );
-        return false;
-    }
-    let version = read_reg(i2c, ES8311_VERSION_REG).await;
-    info!("ES8311 chip ID {id:02X?}, version {version:02X?}");
-    true
 }
 
 /// Writes an address-derived pattern over the whole PSRAM and reads it back.

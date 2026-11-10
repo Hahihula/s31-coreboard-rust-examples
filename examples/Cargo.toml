@@ -27,3 +27,4 @@ log                    = { workspace = true }
 embassy-sync           = { workspace = true }
 embassy-futures        = { workspace = true }
 smart-leds             = { workspace = true }
+libm                   = { workspace = true }

@@ -23,11 +23,20 @@
 //! - [`board::init`] starts the HAL; the logger ([`board::init_logger`],
 //!   `log` feature) and the heap are the firmware's choice.
 //!
-//! The drivers build only for the ESP32-S31.
+//! # Hardware-independent parts
+//!
+//! [`es8311`] (codec driver over any `embedded-hal-async` I2C bus) touches
+//! no peripheral directly, so it also builds for a PC, where its tables are
+//! unit-tested: `cargo test -p esp32-s31-coreboard --target <host triple>`.
+//! The other drivers build only for the ESP32-S31.
 
 #![no_std]
 #![warn(missing_docs)]
 
+pub mod es8311;
+
+#[cfg(target_arch = "riscv32")]
+pub mod audio;
 #[cfg(target_arch = "riscv32")]
 pub mod board;
 #[cfg(target_arch = "riscv32")]
