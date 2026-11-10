@@ -1,0 +1,26 @@
+[package]
+name         = "esp32-s31-coreboard-examples"
+description  = "Demos for the ESP32-S31-Function-CoreBoard-1, built on the esp32-s31-coreboard library"
+edition.workspace      = true
+rust-version.workspace = true
+version.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+publish      = false
+
+[lints]
+workspace = true
+
+# The demos and their helpers build for the ESP32-S31. Hardware-independent
+# helper modules also build for a PC, where they are unit-tested:
+#   cargo test -p esp32-s31-coreboard-examples --lib --target <host triple>
+[target.'cfg(target_arch = "riscv32")'.dependencies]
+esp32-s31-coreboard    = { workspace = true, features = ["log"] }
+esp-hal                = { workspace = true }
+esp-rtos               = { workspace = true }
+esp-bootloader-esp-idf = { workspace = true }
+esp-alloc              = { workspace = true }
+esp-backtrace          = { workspace = true }
+embassy-executor       = { workspace = true }
+embassy-time           = { workspace = true }
+log                    = { workspace = true }
