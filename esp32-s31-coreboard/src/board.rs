@@ -24,7 +24,7 @@
 
 use esp_hal::{
     Async,
-    clock::CpuClock,
+    clock::{ClockConfig, CpuClock, ll::MpllClkConfig},
     i2c::master::{Config as I2cConfig, ConfigError, I2c, Instance as I2cInstance},
     peripherals::{GPIO50, GPIO51, GPIO60, PSRAM, Peripherals, RMT},
     psram::Psram,
@@ -55,10 +55,28 @@ pub mod i2c_addr {
 /// RAM overlaps buffers the ROM may still use after boot. esp-alloc takes
 /// at most three regions in all, PSRAM included.
 ///
+/// The MPLL stays at its default 400 MHz: PSRAM runs at its default
+/// 200 MHz, and Ethernet is limited to 100 Mbps (see [`init_gigabit`]).
+///
 /// The caller still has to start `esp_rtos` with a `TIMG0` timer.
 #[must_use]
 pub fn init() -> Peripherals {
     esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()))
+}
+
+/// Like [`init`], but runs the MPLL at 500 MHz, so Ethernet can make the
+/// 125 MHz RGMII transmit clock for 1000 Mbps (500 / 4; at 400 MHz the
+/// integer divider can't).
+///
+/// PSRAM is clocked from the MPLL too, and its default 200 MHz doesn't
+/// divide 500 MHz. Map it with
+/// `PsramConfig { timing: PsramTimingParams::MHZ_250, ..Default::default() }`
+/// (or `MHZ_125`) after this init.
+#[must_use]
+pub fn init_gigabit() -> Peripherals {
+    let mut clocks = ClockConfig::from(CpuClock::max());
+    clocks.mpll_clk = Some(MpllClkConfig::_500);
+    esp_hal::init(esp_hal::Config::default().with_cpu_clock(clocks))
 }
 
 /// Logs through `esp-println` on UART0 (the board's USB-to-UART port), at

@@ -41,3 +41,5 @@ pub mod audio;
 pub mod board;
 #[cfg(target_arch = "riscv32")]
 pub mod button;
+#[cfg(target_arch = "riscv32")]
+pub mod ethernet;

@@ -1,7 +1,9 @@
-//! Wi-Fi station plus embassy-net stack, shared by the network demos.
+//! Network setup shared by the demos: a Wi-Fi station or the Ethernet port,
+//! each with an embassy-net stack running DHCP, plus DNS/NTP helpers.
 //!
-//! Credentials are read at build time from the `WIFI_SSID` and `WIFI_PASSWORD`
-//! environment variables. An empty or missing password selects an open network.
+//! Wi-Fi credentials are read at build time from the `WIFI_SSID` and
+//! `WIFI_PASSWORD` environment variables. An empty or missing password
+//! selects an open network.
 
 use embassy_executor::Spawner;
 use embassy_net::{
@@ -9,13 +11,14 @@ use embassy_net::{
     dns::DnsQueryType,
     udp::{PacketMetadata, UdpSocket},
 };
-use embassy_time::{Duration, Timer, with_timeout};
-use esp_hal::peripherals::WIFI;
+use embassy_time::{Duration, Instant, Timer, with_timeout};
+use esp_hal::{peripherals::WIFI, rng::Rng};
 use esp_radio::wifi::{
     AuthenticationMethodConfig, Config as WifiConfig, ControllerConfig, Interface, WifiController,
     WifiError,
     sta::{ScanMethod, StationConfig},
 };
+use esp32_s31_coreboard::ethernet::Eth;
 use log::{info, warn};
 use static_cell::StaticCell;
 
@@ -68,13 +71,18 @@ pub fn init_wifi(
     Ok((controller, interface))
 }
 
-/// Starts the network stack with DHCP and spawns the runner and the
-/// connect/reconnect tasks.
-pub fn start(
+/// A random seed for the network stack.
+fn seed() -> u64 {
+    let rng = Rng::new();
+    (u64::from(rng.random()) << 32) | u64::from(rng.random())
+}
+
+/// Starts a network stack with DHCP on the Wi-Fi station and spawns the
+/// runner and the connect/reconnect tasks.
+pub fn start_wifi(
     spawner: &Spawner,
     controller: WifiController<'static>,
     interface: Interface,
-    seed: u64,
 ) -> Stack<'static> {
     static RESOURCES: StaticCell<StackResources<SOCKETS>> = StaticCell::new();
 
@@ -82,17 +90,125 @@ pub fn start(
         interface,
         NetConfig::dhcpv4(Default::default()),
         RESOURCES.init(StackResources::new()),
-        seed,
+        seed(),
     );
 
-    spawner.spawn(net_task(runner).expect("spawn net task"));
+    spawner.spawn(wifi_net_task(runner).expect("spawn net task"));
     spawner.spawn(connection_task(controller).expect("spawn wifi task"));
     stack
 }
 
+/// Starts a network stack with DHCP on the Ethernet port and spawns its
+/// runner. The link comes up by itself when a cable is plugged in.
+pub fn start_ethernet(spawner: &Spawner, eth: Eth<'static>) -> Stack<'static> {
+    static RESOURCES: StaticCell<StackResources<SOCKETS>> = StaticCell::new();
+
+    let (stack, runner) = embassy_net::new(
+        eth,
+        NetConfig::dhcpv4(Default::default()),
+        RESOURCES.init(StackResources::new()),
+        seed(),
+    );
+
+    spawner.spawn(eth_net_task(runner).expect("spawn net task"));
+    stack
+}
+
 #[embassy_executor::task]
-async fn net_task(mut runner: Runner<'static, Interface>) -> ! {
+async fn wifi_net_task(mut runner: Runner<'static, Interface>) -> ! {
     runner.run().await
+}
+
+#[embassy_executor::task]
+async fn eth_net_task(mut runner: Runner<'static, Eth<'static>>) -> ! {
+    runner.run().await
+}
+
+/// Logs the address, gateway and DNS servers DHCP handed out.
+pub fn print_config(stack: Stack<'_>) {
+    if let Some(config) = stack.config_v4() {
+        info!(
+            "DHCP: address {}, gateway {:?}, DNS {:?}",
+            config.address, config.gateway, config.dns_servers
+        );
+    }
+}
+
+/// Wall-clock time from one NTP query plus the uptime since.
+#[derive(Debug, Clone, Copy)]
+pub struct Clock {
+    unix: u64,
+    synced_at: Instant,
+}
+
+impl Clock {
+    /// Queries `server` and starts the clock from its answer.
+    ///
+    /// # Errors
+    ///
+    /// See [`ntp_time`].
+    pub async fn sync(stack: Stack<'_>, server: &str) -> Result<Self, NtpError> {
+        let unix = ntp_time(stack, server).await?;
+        Ok(Self {
+            unix,
+            synced_at: Instant::now(),
+        })
+    }
+
+    /// Current Unix time in seconds.
+    #[must_use]
+    pub fn unix(&self) -> u64 {
+        self.unix + self.synced_at.elapsed().as_secs()
+    }
+
+    /// Current UTC date and time.
+    #[must_use]
+    pub fn now(&self) -> DateTime {
+        DateTime::from_unix(self.unix())
+    }
+}
+
+/// NTP server the demos use.
+pub const NTP_SERVER: &str = "pool.ntp.org";
+
+/// Every 10 s logs the UTC time and the IP address, forever. Syncs the clock
+/// over NTP first (retried every round until it works) and waits for DHCP
+/// again whenever the network goes down.
+pub async fn log_time_forever(stack: Stack<'_>) -> ! {
+    let mut clock = None;
+    loop {
+        if clock.is_none() {
+            match Clock::sync(stack, NTP_SERVER).await {
+                Ok(c) => {
+                    info!("NTP: {} ({})", c.now(), c.unix());
+                    clock = Some(c);
+                }
+                Err(e) => warn!("NTP query to {NTP_SERVER} failed: {e}"),
+            }
+        }
+
+        Timer::after(Duration::from_secs(10)).await;
+
+        if !stack.is_config_up() {
+            warn!("network down, waiting for DHCP...");
+            stack.wait_config_up().await;
+            print_config(stack);
+        }
+        if let Some(clock) = clock {
+            match stack.config_v4() {
+                Some(config) => info!("{} | IP {}", clock.now(), config.address),
+                None => info!("{} | no IP", clock.now()),
+            }
+        }
+    }
+}
+
+/// Resolves `host` and logs the result; for checking DNS works.
+pub async fn check_dns(stack: Stack<'_>, host: &str) {
+    match stack.dns_query(host, DnsQueryType::A).await {
+        Ok(addrs) => info!("DNS: {host} -> {addrs:?}"),
+        Err(e) => warn!("DNS lookup of {host} failed: {e:?}"),
+    }
 }
 
 #[embassy_executor::task]

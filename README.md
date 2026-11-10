@@ -41,7 +41,8 @@ Log verbosity follows `ESP_LOG` (default `info`), for example
 The repository is a Cargo workspace with two crates:
 
 - **`esp32-s31-coreboard`**: the board library. Pin map, start-up, PSRAM, the codec I2C
-  bus, the ES8311 codec and microphone input, the RGB LED and the BOOT button. Use it in your own firmware (see below).
+  bus, the ES8311 codec and microphone input, Gigabit Ethernet, the RGB LED and the BOOT
+  button. Use it in your own firmware (see below).
 - **`esp32-s31-coreboard-examples`** (`examples/`): the demos, plus the app-level helpers
   (start-up, Wi-Fi, SNTP) that only the demos need, so a firmware using the board doesn't
   pull in the network stack.
@@ -49,12 +50,13 @@ The repository is a Cargo workspace with two crates:
 | Path | Contents |
 |------|----------|
 | `esp32-s31-coreboard/src/lib.rs` | Crate docs: what a firmware using the library needs |
-| `esp32-s31-coreboard/src/board.rs` | Board pin map, I2C device addresses, `init()`, logger, codec I2C bus, RGB LED setup, PSRAM mapping (`psram_reserve`, `psram_split`) |
+| `esp32-s31-coreboard/src/board.rs` | Board pin map, I2C device addresses, `init()` (and `init_gigabit()` with the MPLL at 500 MHz), logger, codec I2C bus, RGB LED setup, PSRAM mapping (`psram_reserve`, `psram_split`) |
 | `esp32-s31-coreboard/src/button.rs` | The BOOT button (GPIO61): debounced presses with hold time |
 | `esp32-s31-coreboard/src/es8311.rs` | ES8311 codec driver over any `embedded-hal-async` I2C bus, ported from Espressif's `esp_codec_dev` (clock table and gain steps host-tested) |
+| `esp32-s31-coreboard/src/ethernet.rs` | Gigabit Ethernet: YT8531 PHY reset, RGMII pins (`rgmii_pins!`), MAC address, EMAC driver with link polling every 500 ms |
 | `esp32-s31-coreboard/src/audio.rs` | I2S input stream from the ES8311 (MCLK = 256 x fs, 16-bit stereo Philips, DMA ring buffer, restarts after an overflow) |
 | `examples/src/lib.rs`, `demo.rs` | Helper crate root; the `start!` macro the demos begin with |
-| `examples/src/net.rs` | Wi-Fi station setup, embassy-net stack with DHCP, reconnect task, SNTP client |
+| `examples/src/net.rs` | Wi-Fi station setup and reconnect task, embassy-net stacks with DHCP for Wi-Fi and Ethernet, SNTP client, clock and DNS helpers |
 | `examples/src/sntp.rs`, `time.rs` | SNTP request and reply checks; UTC dates from Unix time (host-tested) |
 | `examples/build.rs` | Linker script (`linkall.x`) and hints for common link errors |
 | `examples/src/bin/NN_*.rs` | The demos |
@@ -306,8 +308,61 @@ INFO - Wi-Fi connected to 'my network' (channel 11, RSSI -40 dBm)
 INFO - DHCP: address 192.168.1.68/24, gateway Some(192.168.1.1), DNS [192.168.1.1]
 INFO - DNS: docs.espressif.com -> [Ipv4(18.166.108.18)]
 INFO - NTP: 2026-11-10 13:12:46 UTC (1794316366)
-INFO - 2026-11-10 13:12:56 UTC | IP 192.168.1.68/24
 ```
+
+### 04 – Ethernet, DHCP, DNS and NTP
+
+```bash
+cargo run --release --bin 04_ethernet
+```
+
+Plug a network cable from the RJ45 port into a router or switch with a DHCP server.
+
+The ESP32-S31 has an Ethernet MAC (EMAC). On this board it is wired over RGMII to a
+Motorcomm YT8531 gigabit PHY, with the RJ45 jack and magnetics behind it. The driver is
+esp-hal's `ethernet` module, which also programs the YT8531's 2 ns RGMII clock delays and
+retunes the transmit clock when the link speed changes.
+
+**1000 Mbps needs the MPLL at 500 MHz.** The MAC makes the RGMII transmit clock from the
+MPLL with an integer divider: 125 MHz for 1000 Mbps, 25 MHz for 100 Mbps. esp-hal runs
+the MPLL at 400 MHz by default, which can't be divided to 125 MHz, so it then limits the
+link to 100 Mbps and logs a warning. This demo starts with `board::init_gigabit()`, which
+sets the MPLL to 500 MHz. PSRAM is clocked from the MPLL too and its default 200 MHz
+doesn't divide 500 MHz, so a firmware using both has to map PSRAM with the 250 MHz (or
+125 MHz) timing preset.
+
+What the demo does:
+
+1. Prints the Ethernet MAC address: the chip's base MAC (the Wi-Fi station address) + 3,
+   as ESP-IDF derives it.
+2. Holds the PHY in reset (GPIO7) for 100 ms, waits 300 ms, then starts the EMAC. The PHY
+   address is found by scanning the MDIO bus (MDC GPIO5, MDIO GPIO6).
+3. Waits for the cable link and logs the negotiated speed and duplex. The PHY is polled
+   over MDIO every 500 ms.
+4. Gets an address over DHCP, looks up `docs.espressif.com` and fetches the time from
+   `pool.ntp.org`, the same way as demo 03.
+5. Every 10 seconds prints the UTC time and the IP address. Unplugging the cable logs
+   `link down`; plugging it back in brings the link and DHCP back.
+
+Expected output on a gigabit switch (verified on a board; addresses are examples):
+
+```
+INFO - === Demo 04: Ethernet, DHCP, DNS, NTP ===
+INFO - MAC address 1c:29:04:..:..:..
+INFO - Ethernet PHY at MDIO address 0
+INFO - Waiting for the cable link...
+INFO - Ethernet link up: _1000M, Full duplex
+INFO - link_up = true
+INFO - Waiting for DHCP...
+INFO - DHCP: address 192.168.1.70/24, gateway Some(192.168.1.1), DNS [192.168.1.1]
+INFO - DNS: docs.espressif.com -> [Ipv4(18.166.108.18)]
+INFO - NTP: 2026-11-10 13:29:19 UTC (1794317359)
+INFO - 2026-11-10 13:29:29 UTC | IP 192.168.1.70/24
+```
+
+With `board::init()` instead (MPLL at 400 MHz) the same board logs
+`MPLL at 400 MHz cannot make the 125 MHz RGMII clock, limiting Ethernet to 100 Mbps` and
+links at `_100M`.
 
 ## License
 

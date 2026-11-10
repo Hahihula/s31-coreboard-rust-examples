@@ -1081,7 +1081,9 @@ dependencies = [
  "esp-hal",
  "esp-hal-smartled",
  "esp-println",
+ "log",
  "smart-leds",
+ "static_cell",
 ]
 
 [[package]]

@@ -15,17 +15,14 @@
 #![deny(clippy::large_stack_frames)]
 
 use embassy_executor::Spawner;
-use embassy_net::{Stack, dns::DnsQueryType};
-use embassy_time::{Duration, Instant, Timer};
+use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
-use esp_hal::rng::Rng;
 use esp_radio::wifi::{WifiController, scan::ScanConfig};
-use esp32_s31_coreboard_examples::net::{self, DateTime};
+use esp32_s31_coreboard_examples::net;
 use log::{error, info, warn};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-const NTP_SERVER: &str = "pool.ntp.org";
 const DNS_TEST_HOST: &str = "docs.espressif.com";
 
 #[allow(
@@ -60,47 +57,13 @@ async fn main(spawner: Spawner) -> ! {
     );
     scan(&mut controller, Some(ssid)).await;
 
-    let rng = Rng::new();
-    let seed = (u64::from(rng.random()) << 32) | u64::from(rng.random());
-    let stack = net::start(&spawner, controller, interface, seed);
+    let stack = net::start_wifi(&spawner, controller, interface);
 
     info!("Waiting for DHCP...");
     stack.wait_config_up().await;
-    print_config(stack);
-
-    match stack.dns_query(DNS_TEST_HOST, DnsQueryType::A).await {
-        Ok(addrs) => info!("DNS: {DNS_TEST_HOST} -> {addrs:?}"),
-        Err(e) => warn!("DNS lookup of {DNS_TEST_HOST} failed: {e:?}"),
-    }
-
-    // Unix time at the moment `synced_at` was taken.
-    let mut clock: Option<(u64, Instant)> = None;
-    loop {
-        if clock.is_none() {
-            match net::ntp_time(stack, NTP_SERVER).await {
-                Ok(unix) => {
-                    info!("NTP: {} ({unix})", DateTime::from_unix(unix));
-                    clock = Some((unix, Instant::now()));
-                }
-                Err(e) => warn!("NTP query to {NTP_SERVER} failed: {e:?}"),
-            }
-        }
-
-        Timer::after(Duration::from_secs(10)).await;
-
-        if !stack.is_config_up() {
-            warn!("network down, waiting for DHCP...");
-            stack.wait_config_up().await;
-            print_config(stack);
-        }
-        if let Some((unix, synced_at)) = clock {
-            let now = unix + synced_at.elapsed().as_secs();
-            match stack.config_v4() {
-                Some(config) => info!("{} | IP {}", DateTime::from_unix(now), config.address),
-                None => info!("{} | no IP", DateTime::from_unix(now)),
-            }
-        }
-    }
+    net::print_config(stack);
+    net::check_dns(stack, DNS_TEST_HOST).await;
+    net::log_time_forever(stack).await
 }
 
 /// Lists nearby access points and warns when `wanted` is not among them.
@@ -132,14 +95,5 @@ async fn scan(controller: &mut WifiController<'_>, wanted: Option<&str>) {
             }
         }
         Err(e) => warn!("scan failed: {e:?}"),
-    }
-}
-
-fn print_config(stack: Stack<'_>) {
-    if let Some(config) = stack.config_v4() {
-        info!(
-            "DHCP: address {}, gateway {:?}, DNS {:?}",
-            config.address, config.gateway, config.dns_servers
-        );
     }
 }
