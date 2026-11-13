@@ -18,6 +18,7 @@ rust_2018_idioms       = { level = "warn", priority = -1 }
 # One version of each dependency for the library and the demos.
 [workspace.dependencies]
 esp32-s31-coreboard = { path = "esp32-s31-coreboard" }
+es8311-async        = "0.1"
 
 esp-hal                = { version = "1.2", features = ["esp32s31", "log-04", "unstable"] }
 esp-rtos               = { version = "0.4.0", features = ["embassy", "esp-alloc", "esp-radio", "esp32s31", "log-04"] }

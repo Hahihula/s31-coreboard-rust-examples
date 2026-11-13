@@ -681,6 +681,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "00d174d5400e5e8fd687ad1049e2f578285fa914201b1af7e8b112a4546bd826"
 
 [[package]]
+name = "es8311-async"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72c32a4d9a1f50dad2f2b840f442f07576f11888777ea42340aeaa62c92bd231"
+dependencies = [
+ "embedded-hal-async",
+]
+
+[[package]]
 name = "esp-alloc"
 version = "0.11.0"
 source = "git+https://github.com/esp-rs/esp-hal?rev=33f9b0f7c36ac47edbd015808b5399090fc1f9b6#33f9b0f7c36ac47edbd015808b5399090fc1f9b6"
@@ -1077,6 +1086,7 @@ version = "0.1.0"
 dependencies = [
  "embassy-time",
  "embedded-hal-async",
+ "es8311-async",
  "esp-alloc",
  "esp-hal",
  "esp-hal-smartled",

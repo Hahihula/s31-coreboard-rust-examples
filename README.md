@@ -41,7 +41,7 @@ Log verbosity follows `ESP_LOG` (default `info`), for example
 The repository is a Cargo workspace with two crates:
 
 - **`esp32-s31-coreboard`**: the board library. Pin map, start-up, PSRAM, the codec I2C
-  bus, the ES8311 codec and microphone input, Gigabit Ethernet, the RGB LED and the BOOT
+  bus, the ES8311 codec with microphone input and speaker output, Gigabit Ethernet, the RGB LED and the BOOT
   button. Use it in your own firmware (see below).
 - **`esp32-s31-coreboard-examples`** (`examples/`): the demos, plus the app-level helpers
   (start-up, Wi-Fi, SNTP, HTTP) that only the demos need, so a firmware using the board doesn't
@@ -50,11 +50,10 @@ The repository is a Cargo workspace with two crates:
 | Path | Contents |
 |------|----------|
 | `esp32-s31-coreboard/src/lib.rs` | Crate docs: what a firmware using the library needs |
-| `esp32-s31-coreboard/src/board.rs` | Board pin map, I2C device addresses, `init()` (and `init_gigabit()` with the MPLL at 500 MHz), logger, codec I2C bus, RGB LED setup, PSRAM mapping (`psram_reserve`, `psram_split`) |
+| `esp32-s31-coreboard/src/board.rs` | Board pin map, I2C device addresses, `init()` (and `init_gigabit()` with the MPLL at 500 MHz), logger, codec I2C bus, RGB LED setup, speaker amplifier enable, PSRAM mapping (`psram_reserve`, `psram_split`) |
 | `esp32-s31-coreboard/src/button.rs` | The BOOT button (GPIO61): debounced presses with hold time |
-| `esp32-s31-coreboard/src/es8311.rs` | ES8311 codec driver over any `embedded-hal-async` I2C bus, ported from Espressif's `esp_codec_dev` (clock table and gain steps host-tested) |
 | `esp32-s31-coreboard/src/ethernet.rs` | Gigabit Ethernet: YT8531 PHY reset, RGMII pins (`rgmii_pins!`), MAC address, EMAC driver with link polling every 500 ms |
-| `esp32-s31-coreboard/src/audio.rs` | I2S input stream from the ES8311 (MCLK = 256 x fs, 16-bit stereo Philips, DMA ring buffer, restarts after an overflow) |
+| `esp32-s31-coreboard/src/audio.rs` | I2S input (`AudioIn`) and output (`AudioOut`) streams for the ES8311 (MCLK = 256 x fs, 16-bit stereo Philips, DMA ring buffer, restarts after an overflow or underrun) |
 | `examples/src/lib.rs`, `demo.rs` | Helper crate root; the `start!` macro the demos begin with |
 | `examples/src/net.rs` | Wi-Fi station setup and reconnect task, embassy-net stacks with DHCP for Wi-Fi and Ethernet, SNTP client, clock and DNS helpers |
 | `examples/src/http.rs` | Minimal HTTP/1.1: request line, query parameters, `rrggbb` colors, response headers (host-tested) |
@@ -110,7 +109,7 @@ What the firmware has to bring itself:
 
 ## Tests and CI
 
-The hardware-independent modules (the ES8311 driver's clock table and gain steps, HTTP
+The hardware-independent modules (HTTP
 parsing, SNTP packets, dates) have unit tests that run on a PC. The workspace builds for
 the ESP32-S31 by default, so give the host target:
 
@@ -243,9 +242,9 @@ INFO - mic  -67.2 dBFS (peak  -56.7)
 
 The first report includes the codec powering up and reads louder.
 
-There is an `es8311` crate on crates.io, but these demos don't use it: it is blocking
-only, and its mic gain writes values outside the gain bits of register 0x16, so the gain
-doesn't change. `es8311.rs` here follows Espressif's driver register for register.
+The codec driver is the `es8311-async` crate
+([source](https://github.com/Hahihula/es8311-async)), re-exported as `esp32_s31_coreboard::es8311`. It is async and follows
+Espressif's `esp_codec_dev` driver register for register.
 
 ### 03 – Wi-Fi, DHCP, DNS and NTP
 
@@ -398,6 +397,50 @@ How it works:
   like the color picked in the browser.
 - Like demo 04 it uses `board::init_gigabit()` for 1000 Mbps Ethernet, and a 96 KiB heap
   for the Wi-Fi driver.
+
+Expected output with Wi-Fi only (verified on a board; names and addresses are
+examples). Every color change is logged with the network it came from; dragging the
+picker sends a stream of them:
+
+```
+INFO - === Demo 05: web-controlled RGB LED ===
+INFO - Ethernet PHY at MDIO address 0
+INFO - Wi-Fi connecting...
+INFO - link_up = true
+INFO - Wi-Fi connected to 'my network' (channel 11, RSSI -32 dBm)
+INFO - Wi-Fi: open http://192.168.1.68/
+INFO - Wi-Fi: LED #ff0000
+INFO - Wi-Fi: LED #ad7b7b
+INFO - Wi-Fi: LED #a97979
+```
+
+### 06 – Speaker
+
+```bash
+cargo run --release --bin 06_speaker
+```
+
+Plays generated sound through the ES8311 DAC and the NS4150B amplifier:
+
+1. Starts I2S as master at 44.1 kHz, 16-bit stereo Philips, with MCLK (GPIO52) at
+   256 × fs, and streams silence.
+2. Reads the ES8311 chip ID (`83 11`), starts the codec (`init` powers up the DAC muted),
+   then sets the DAC volume to -20 dB and unmutes it.
+3. Switches the amplifier on (GPIO57) last, so the codec's power-up doesn't pop in the
+   speaker, and plays a chime.
+4. A small sine synthesiser with a 10 ms fade per note renders the tunes into the I2S
+   ring from a task; the RGB LED is lit while a tune plays.
+
+A **BOOT** press plays the next tune: scale, Ode to Joy, chime.
+
+Expected output (verified on a board; the sound is quiet but clearly audible at -20 dB):
+
+```
+INFO - === Demo 06: speaker (ES8311, 44.1 kHz) ===
+INFO - ES8311 chip ID [83, 11]
+INFO - ES8311 DAC running, volume -20 dB
+INFO - BOOT = next tune (scale, Ode to Joy, chime)
+```
 
 ## License
 

@@ -115,7 +115,7 @@ async fn main(spawner: Spawner) -> ! {
     Timer::after(Duration::from_millis(20)).await;
 
     let mut i2c = board::i2c(p.I2C0, p.GPIO51, p.GPIO50).expect("I2C config is valid");
-    let mut codec = Es8311::new(&mut i2c);
+    let mut codec = Es8311::new(&mut i2c, es8311::DEFAULT_ADDRESS);
     match codec.chip_id().await {
         Ok(es8311::CHIP_ID) => info!("ES8311 chip ID {:02X?}", es8311::CHIP_ID),
         Ok(id) => warn!("unexpected chip ID {id:02X?}"),

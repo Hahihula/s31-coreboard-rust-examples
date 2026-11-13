@@ -25,8 +25,9 @@
 use esp_hal::{
     Async,
     clock::{ClockConfig, CpuClock, ll::MpllClkConfig},
+    gpio::{Level, Output, OutputConfig},
     i2c::master::{Config as I2cConfig, ConfigError, I2c, Instance as I2cInstance},
-    peripherals::{GPIO50, GPIO51, GPIO60, PSRAM, Peripherals, RMT},
+    peripherals::{GPIO50, GPIO51, GPIO57, GPIO60, PSRAM, Peripherals, RMT},
     psram::Psram,
     rmt::Rmt,
     time::Rate,
@@ -37,7 +38,7 @@ use smart_leds::RGB8;
 /// 7-bit addresses of the devices on the I2C bus.
 pub mod i2c_addr {
     /// ES8311 audio codec (CE pin low; the schematic lists 8-bit 0x30).
-    pub const ES8311: u8 = crate::es8311::ADDRESS;
+    pub const ES8311: u8 = crate::es8311::DEFAULT_ADDRESS;
 }
 
 /// Initialises the HAL with the maximum CPU clock (320 MHz).
@@ -104,6 +105,13 @@ pub fn i2c<'d>(
         .with_sda(sda)
         .with_scl(scl)
         .into_async())
+}
+
+/// Switches the NS4150B speaker amplifier on (GPIO57, active high) for as long
+/// as the returned pin is kept. Enable it after the codec's DAC is running,
+/// so the codec's power-up doesn't pop in the speaker.
+pub fn speaker_amp_on(pin: GPIO57<'_>) -> Output<'_> {
+    Output::new(pin, Level::High, OutputConfig::default())
 }
 
 /// RMT source clock used for the WS2812 timing.

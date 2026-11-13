@@ -1,6 +1,6 @@
 [package]
 name         = "esp32-s31-coreboard"
-description  = "Board support for the ESP32-S31-Function-CoreBoard-1: pins, PSRAM, ES8311 microphone over I2S, Gigabit Ethernet, RGB LED, BOOT button"
+description  = "Board support for the ESP32-S31-Function-CoreBoard-1: pins, PSRAM, ES8311 microphone and speaker over I2S, Gigabit Ethernet, RGB LED, BOOT button"
 edition.workspace      = true
 rust-version.workspace = true
 version.workspace      = true
@@ -19,10 +19,9 @@ default = []
 # a firmware picks its own console and logger.
 log = ["dep:esp-println"]
 
-# Always built: the hardware-independent modules (es8311), which are
-# unit-tested on a PC: `cargo test -p esp32-s31-coreboard --target <host>`.
 [dependencies]
 embedded-hal-async = { workspace = true }
+es8311-async       = { workspace = true }
 
 # The drivers, only for the ESP32-S31.
 [target.'cfg(target_arch = "riscv32")'.dependencies]

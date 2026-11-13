@@ -23,17 +23,16 @@
 //! - [`board::init`] starts the HAL; the logger ([`board::init_logger`],
 //!   `log` feature) and the heap are the firmware's choice.
 //!
-//! # Hardware-independent parts
+//! # The codec driver
 //!
-//! [`es8311`] (codec driver over any `embedded-hal-async` I2C bus) touches
-//! no peripheral directly, so it also builds for a PC, where its tables are
-//! unit-tested: `cargo test -p esp32-s31-coreboard --target <host triple>`.
-//! The other drivers build only for the ESP32-S31.
+//! [`es8311`] is the [`es8311-async`](https://crates.io/crates/es8311-async) crate, re-exported:
+//! a driver over any `embedded-hal-async` I2C bus, also usable on other boards.
+//! The other modules build only for the ESP32-S31.
 
 #![no_std]
 #![warn(missing_docs)]
 
-pub mod es8311;
+pub use es8311_async as es8311;
 
 #[cfg(target_arch = "riscv32")]
 pub mod audio;

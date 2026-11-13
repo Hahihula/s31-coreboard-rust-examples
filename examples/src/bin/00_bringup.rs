@@ -70,7 +70,7 @@ async fn main(_spawner: Spawner) -> ! {
 
 /// Checks the ES8311 chip ID and logs it with the chip version.
 async fn check_codec(i2c: &mut I2c<'_, Async>) {
-    let mut codec = Es8311::new(i2c);
+    let mut codec = Es8311::new(i2c, es8311::DEFAULT_ADDRESS);
     match codec.chip_id().await {
         Ok(es8311::CHIP_ID) => {
             let version = codec.chip_version().await.ok();
@@ -81,10 +81,13 @@ async fn check_codec(i2c: &mut I2c<'_, Async>) {
         }
         Ok(id) => warn!(
             "Device at 0x{:02X} has chip ID {id:02X?}, expected {:02X?}",
-            es8311::ADDRESS,
+            es8311::DEFAULT_ADDRESS,
             es8311::CHIP_ID
         ),
-        Err(e) => warn!("ES8311 did not answer at 0x{:02X}: {e:?}", es8311::ADDRESS),
+        Err(e) => warn!(
+            "ES8311 did not answer at 0x{:02X}: {e:?}",
+            es8311::DEFAULT_ADDRESS
+        ),
     }
 }
 
