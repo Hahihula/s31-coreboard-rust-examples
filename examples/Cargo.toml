@@ -32,3 +32,6 @@ esp-radio              = { workspace = true }
 embassy-net            = { workspace = true }
 static_cell            = { workspace = true }
 embedded-io-async      = { workspace = true }
+sntpc                  = { workspace = true }
+sntpc-net-embassy      = { workspace = true }
+sntpc-time-embassy     = { workspace = true }

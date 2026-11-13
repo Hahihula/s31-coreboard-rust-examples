@@ -3,12 +3,12 @@
 //!
 //! - [`demo`]: the `start!` macro every demo begins with.
 //! - [`net`]: Wi-Fi station with reconnect, embassy-net stacks with DHCP
-//!   for Wi-Fi and Ethernet, SNTP client, clock and DNS helpers.
+//!   for Wi-Fi and Ethernet, an SNTP query (the `sntpc` crate), clock and DNS helpers.
 //! - [`http`]: request-line parsing, query parameters, colors and response
 //!   headers for the web demos.
-//! - [`sntp`], [`time`]: SNTP packets and dates from Unix time.
+//! - [`time`]: dates from Unix time.
 //!
-//! [`http`], [`sntp`] and [`time`] have no hardware dependencies and also
+//! [`http`] and [`time`] have no hardware dependencies and also
 //! build for a PC, where they are unit-tested:
 //! `cargo test -p esp32-s31-coreboard-examples --lib --target <host triple>`.
 
@@ -16,7 +16,6 @@
 #![warn(missing_docs)]
 
 pub mod http;
-pub mod sntp;
 pub mod time;
 
 #[cfg(target_arch = "riscv32")]

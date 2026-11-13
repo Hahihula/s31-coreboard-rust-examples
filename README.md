@@ -55,10 +55,10 @@ The repository is a Cargo workspace with two crates:
 | `esp32-s31-coreboard/src/ethernet.rs` | Gigabit Ethernet: YT8531 PHY reset, RGMII pins (`rgmii_pins!`), MAC address, EMAC driver with link polling every 500 ms |
 | `esp32-s31-coreboard/src/audio.rs` | I2S input (`AudioIn`) and output (`AudioOut`) streams for the ES8311 (MCLK = 256 x fs, 16-bit stereo Philips, DMA ring buffer, restarts after an overflow or underrun) |
 | `examples/src/lib.rs`, `demo.rs` | Helper crate root; the `start!` macro the demos begin with |
-| `examples/src/net.rs` | Wi-Fi station setup and reconnect task, embassy-net stacks with DHCP for Wi-Fi and Ethernet, SNTP client, clock and DNS helpers |
+| `examples/src/net.rs` | Wi-Fi station setup and reconnect task, embassy-net stacks with DHCP for Wi-Fi and Ethernet, SNTP query (the `sntpc` crate with its embassy adapters), clock and DNS helpers |
 | `examples/src/http.rs` | Minimal HTTP/1.1: request line, query parameters, `rrggbb` colors, response headers (host-tested) |
 | `examples/assets/web_led.html` | The page of demo 05 (HTML + JavaScript, embedded with `include_str!`) |
-| `examples/src/sntp.rs`, `time.rs` | SNTP request and reply checks; UTC dates from Unix time (host-tested) |
+| `examples/src/time.rs` | UTC dates from Unix time (host-tested) |
 | `examples/build.rs` | Linker script (`linkall.x`) and hints for common link errors |
 | `examples/src/bin/NN_*.rs` | The demos |
 
@@ -110,7 +110,7 @@ What the firmware has to bring itself:
 ## Tests and CI
 
 The hardware-independent modules (HTTP
-parsing, SNTP packets, dates) have unit tests that run on a PC. The workspace builds for
+parsing, dates) have unit tests that run on a PC. The workspace builds for
 the ESP32-S31 by default, so give the host target:
 
 ```bash
@@ -275,9 +275,9 @@ What the demo does:
    gets no answer from the driver within 30 s is cancelled and retried.
 3. Gets an IP address, gateway and DNS server over DHCP (embassy-net).
 4. Looks up `docs.espressif.com` in DNS.
-5. Fetches the time from `pool.ntp.org` with a minimal SNTP request over UDP. Only a reply
-   from the server's address that echoes the request's random timestamp and comes from a
-   synchronised server (stratum 1-15) is accepted.
+5. Fetches the time from `pool.ntp.org` with the [`sntpc`](https://crates.io/crates/sntpc)
+   crate (SNTP over UDP, 5 s timeout). `sntpc` checks that the reply comes from the
+   server's address, echoes the request's timestamp and is from a synchronised server.
 6. Every 10 seconds prints the current UTC time (NTP time plus the time elapsed since)
    and the IP address. If NTP failed, it is retried each round instead.
 
